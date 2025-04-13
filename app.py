@@ -35,14 +35,15 @@ def init_traffic_lights():
 
 init_traffic_lights()
 
-# Initialize car simulation variables
 car_x = 0
 car_speed = initial_speed
 waiting_at = None
 
 # -----------------------
-# ADVICE SMOOTHING (using session state)
+# SESSION STATE FOR VOICE ALERTS
 # -----------------------
+if "prev_predicted_phase" not in st.session_state:
+    st.session_state.prev_predicted_phase = None
 if "current_advice" not in st.session_state:
     st.session_state.current_advice = "Maintain"
     st.session_state.advice_counter = 0
@@ -54,8 +55,7 @@ if run_button:
     info_box = st.empty()
     signal_box = st.empty()
     road_box = st.empty()
-    
-    # Run simulation loop until car goes off screen
+
     while car_x <= 1100:
         # --- Update signal timers ---
         for sig in signal_states.values():
@@ -70,20 +70,20 @@ if run_button:
                 elif sig['phase'] == 'yellow':
                     sig['phase'] = 'red'
                     sig['timer'] = random.randint(30, 60)
-        
+
         # --- Find next signal ---
         next_signal = None
         for lbl in signal_labels:
             if signal_states[lbl]['x'] > car_x:
                 next_signal = lbl
                 break
-        
+
         suggestion = "Maintain"
         eta = float('inf')
         distance = 0
         predicted_phase = "-"
         current_phase = "-"
-        
+
         if next_signal:
             signal = signal_states[next_signal]
             distance = signal['x'] - car_x
@@ -92,7 +92,7 @@ if run_button:
                 eta = distance / (car_speed * 0.1)
             else:
                 eta = float('inf')
-            
+
             # --- Predict phase ---
             rem = eta
             phase = current_phase
@@ -123,7 +123,7 @@ if run_button:
                     predicted_phase = "green"
                 else:
                     predicted_phase = "yellow"
-            
+
             # --- Suggest speed based on current phase ---
             if current_phase == 'red' and distance <= 40:
                 suggestion = 'Slow Down'
@@ -140,27 +140,25 @@ if run_button:
                     if random.random() < 0.7:
                         car_speed -= 5
                         car_speed = max(car_speed, min_speed)
-        
+
         # --- Resume after red ---
         if waiting_at and signal_states[waiting_at]['phase'] == 'green':
             waiting_at = None
             car_speed = 15
-        
+
         # --- Update advice smoothing ---
-        # Only update if the same suggestion persists for two cycles
         if suggestion == st.session_state.current_advice:
             st.session_state.advice_counter += 1
         else:
             st.session_state.current_advice = suggestion
             st.session_state.advice_counter = 1
-        
+
         stable_suggestion = st.session_state.current_advice if st.session_state.advice_counter >= 2 else "Maintain"
-        
-        # --- Move car forward (only if not waiting) ---
-        if car_speed > 0:  # if not waiting
+
+        # --- Move car forward (if not waiting) ---
+        if car_speed > 0:
             car_x += car_speed * 0.1
-        
-        # --- Update info panel ---
+
         eta_str = "N/A" if math.isinf(eta) else f"{int(eta)}s"
         info_box.markdown(
             f"""
@@ -175,30 +173,30 @@ if run_button:
             """
         )
         
-        # --- Voice Alert using Browser TTS ---
-        # Use stable_suggestion for voice output
-        voice = ""
-        if stable_suggestion == "Speed Up":
-            voice = "Signal is green. You can speed up."
-        elif stable_suggestion == "Slow Down":
-            voice = "Red signal ahead. Please slow down."
-        elif stable_suggestion == "Maintain":
-            voice = "Maintain your current speed."
-        
-        # Inject TTS JavaScript via HTML component (height set to 0)
-        components.html(
-            f"""
-            <script>
-            var msg = new SpeechSynthesisUtterance("{voice}");
-            window.speechSynthesis.cancel();
-            window.speechSynthesis.speak(msg);
-            </script>
-            """,
-            height=0
-        )
-        
+        # --- Voice Alert: Trigger only if predicted phase changed ---
+        if st.session_state.prev_predicted_phase != predicted_phase:
+            voice = ""
+            if stable_suggestion == "Speed Up":
+                voice = "Signal is green. You can speed up."
+            elif stable_suggestion == "Slow Down":
+                voice = "Red signal ahead. Please slow down."
+            elif stable_suggestion == "Maintain":
+                voice = "Maintain your current speed."
+            
+            components.html(
+                f"""
+                <script>
+                var msg = new SpeechSynthesisUtterance("{voice}");
+                window.speechSynthesis.cancel();
+                window.speechSynthesis.speak(msg);
+                </script>
+                """,
+                height=0
+            )
+            st.session_state.prev_predicted_phase = predicted_phase
+
         # --- ROAD VISUALIZATION ---
-        road_display = ["-"] * 120  # Create a simple road line
+        road_display = ["-"] * 120
         for lbl in signal_labels:
             pos = int(signal_states[lbl]["x"] / 10)
             phase = signal_states[lbl]["phase"]
@@ -220,5 +218,5 @@ if run_button:
             sig = signal_states[lbl]
             with cols[i]:
                 st.metric(label=f"Signal {lbl}", value=sig['phase'].capitalize(), delta=f"{sig['timer']}s")
-        
+
         time.sleep(1)
