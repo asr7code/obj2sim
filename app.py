@@ -44,6 +44,8 @@ waiting_at = None
 if run_button:
     info_box = st.empty()
     signal_box = st.empty()
+    road_box = st.empty()
+    
     while car_x <= 1100:
         # --- Update signal timers ---
         for sig in signal_states.values():
@@ -171,7 +173,31 @@ if run_button:
             unsafe_allow_html=True
         )
 
-        # Display all signals
+        # -------------------------
+        # ROAD VISUALIZATION
+        # -------------------------
+        road_display = ["-"] * 120
+
+        # Traffic light positions
+        for lbl in signal_labels:
+            pos = int(signal_states[lbl]["x"] / 10)
+            phase = signal_states[lbl]["phase"]
+            if phase == "red":
+                road_display[pos] = "🟥"
+            elif phase == "green":
+                road_display[pos] = "🟩"
+            elif phase == "yellow":
+                road_display[pos] = "🟨"
+
+        # Car position
+        car_pos_index = int(car_x / 10)
+        if 0 <= car_pos_index < len(road_display):
+            road_display[car_pos_index] = "🔵"
+
+        road_box.markdown("### 🛣️ Road View")
+        road_box.code("".join(road_display))
+
+        # Signal Timers
         cols = st.columns(len(signal_labels))
         for i, lbl in enumerate(signal_labels):
             sig = signal_states[lbl]
