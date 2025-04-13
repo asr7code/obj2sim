@@ -8,7 +8,7 @@ import math
 # -----------------------
 st.set_page_config(page_title="Traffic Optimizer", layout="wide")
 st.title("🚦 Traffic Optimizer & Assistant - Objective 2 Simulation")
-st.markdown("This simulation suggests dynamic speed adjustments to help a vehicle pass upcoming signals smartly.")
+st.markdown("This simulation suggests smart speed adjustments to help a vehicle pass traffic signals efficiently.")
 
 # -----------------------
 # SIDEBAR CONTROLS
@@ -147,8 +147,28 @@ if run_button:
             - **Current Phase:** `{current_phase}`  
             - **ETA:** `{eta_str}`  
             - **Predicted Phase:** `{predicted_phase}`  
-            - **Advice:** `{suggestion}`
+            - **Advice:** 🚘 `{suggestion}`
             """
+        )
+
+        # Voice Alert (Browser TTS)
+        voice = ""
+        if suggestion == "Speed Up":
+            voice = "Signal is green. You can speed up."
+        elif suggestion == "Slow Down":
+            voice = "Red signal ahead. Please slow down."
+        elif suggestion == "Maintain":
+            voice = "Maintain your current speed."
+
+        st.markdown(
+            f"""
+            <script>
+            var msg = new SpeechSynthesisUtterance("{voice}");
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.speak(msg);
+            </script>
+            """,
+            unsafe_allow_html=True
         )
 
         # Display all signals
