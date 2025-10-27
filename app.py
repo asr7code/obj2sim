@@ -1,222 +1,251 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import random
 import time
-import math
+from datetime import datetime
 
 # -----------------------
 # PAGE CONFIGURATION
 # -----------------------
-st.set_page_config(page_title="Traffic Optimizer", layout="wide")
-st.title("🚦 Traffic Optimizer & Assistant - Objective 2 Simulation")
-st.markdown("This simulation suggests smart speed adjustments to help a vehicle pass traffic signals efficiently.")
+st.set_page_config(page_title="Accident Prevention Sim", layout="wide")
+st.title("🚨 Accident Prevention Simulation (ATOA)")
+st.markdown("This simulation demonstrates how the ATOA system prevents chain-reaction accidents in low-visibility (fog) conditions.")
 
 # -----------------------
 # SIDEBAR CONTROLS
 # -----------------------
 st.sidebar.header("Simulation Controls")
-initial_speed = st.sidebar.slider("Initial Speed (km/h)", 10, 60, 25)
-max_speed = st.sidebar.slider("Max Speed", 10, 60, 60)
-min_speed = st.sidebar.slider("Min Speed", 10, 60, 10)
+num_cars = st.sidebar.slider("Number of Cars per Road", 2, 5, 3)
+fog_level = st.sidebar.slider("Fog Level (Reduces Visibility)", 0, 90, 75)
 run_button = st.sidebar.button("▶ Start Simulation")
 
 # -----------------------
-# INITIAL SIMULATION STATE
+# SIMULATION CONSTANTS
 # -----------------------
-signal_positions = [150, 350, 550, 750, 950]
-signal_labels = ['B', 'C', 'D', 'E', 'F']
-signal_states = {}
-
-def init_traffic_lights():
-    for label, x in zip(signal_labels, signal_positions):
-        phase = random.choice(['red', 'green', 'yellow'])
-        timer = random.randint(10, 45) if phase != 'yellow' else 5
-        signal_states[label] = {'x': x, 'phase': phase, 'timer': timer}
-
-init_traffic_lights()
-
-car_x = 0
-car_speed = initial_speed
-waiting_at = None
+ROAD_LENGTH = 200  # <--- INCREASED FOR LONGER SIMULATION
+NORMAL_SPEED = 2
+BRAKING_SPEED = 1
+# Fog reduces visibility. 0 fog = 50 visibility. 75 fog = 12.5 visibility.
+VISIBILITY_DISTANCE = 50 * (1 - fog_level / 100.0)
+# Minimum distance needed to stop
+BRAKING_DISTANCE = 15 
+# Probability of an accident per tick for the lead car
+ACCIDENT_PROBABILITY = 0.03 # <--- DECREASED TO PREVENT EARLY ACCIDENT
 
 # -----------------------
-# SESSION STATE FOR VOICE ALERTS
+# HELPER FUNCTIONS
 # -----------------------
-if "prev_predicted_phase" not in st.session_state:
-    st.session_state.prev_predicted_phase = None
-if "current_advice" not in st.session_state:
-    st.session_state.current_advice = "Maintain"
-    st.session_state.advice_counter = 0
 
-# -----------------------
-# SIMULATION LOOP
-# -----------------------
-if run_button:
-    info_box = st.empty()
-    signal_box = st.empty()
-    road_box = st.empty()
+def get_time():
+    """Helper to get a simple timestamp for the log."""
+    return datetime.now().strftime("%H:%M:%S")
 
-    while car_x <= 1100:
-        # --- Update signal timers ---
-        for sig in signal_states.values():
-            sig['timer'] -= 1
-            if sig['timer'] <= 0:
-                if sig['phase'] == 'red':
-                    sig['phase'] = 'green'
-                    sig['timer'] = 45
-                elif sig['phase'] == 'green':
-                    sig['phase'] = 'yellow'
-                    sig['timer'] = 5
-                elif sig['phase'] == 'yellow':
-                    sig['phase'] = 'red'
-                    sig['timer'] = random.randint(30, 60)
+def add_log_entry(log, message):
+    """Adds a new entry to the top of a log list."""
+    log.insert(0, f"[{get_time()}] {message}")
 
-        # --- Find next signal ---
-        next_signal = None
-        for lbl in signal_labels:
-            if signal_states[lbl]['x'] > car_x:
-                next_signal = lbl
-                break
+def initialize_cars(road_id):
+    """Creates a list of car dictionaries for a road."""
+    cars = []
+    for i in range(num_cars):
+        cars.append({
+            'id': f"{road_id}-{i}",
+            # Start spaced out further on the longer road
+            'x': (num_cars - i - 1) * 40,  
+            'speed': NORMAL_SPEED,
+            'status': 'Normal', # Normal, Braking (Alert), Braking (Visual), Stopped, Crashed
+            'alert': None,
+            'log_alerted': False # Flag to prevent log spam
+        })
+    return cars
 
-        suggestion = "Maintain"
-        eta = float('inf')
-        distance = 0
-        predicted_phase = "-"
-        current_phase = "-"
-
-        if next_signal:
-            signal = signal_states[next_signal]
-            distance = signal['x'] - car_x
-            current_phase = signal['phase']
-            if car_speed > 0:
-                eta = distance / (car_speed * 0.1)
-            else:
-                eta = float('inf')
-
-            # --- Predict phase ---
-            rem = eta
-            phase = current_phase
-            time_left = signal['timer']
-            if rem <= time_left:
-                predicted_phase = phase
-            elif phase == "red":
-                rem -= time_left
-                if rem <= 45:
-                    predicted_phase = "green"
-                elif rem <= 50:
-                    predicted_phase = "yellow"
-                else:
-                    predicted_phase = "red"
-            elif phase == "green":
-                rem -= time_left
-                if rem <= 5:
-                    predicted_phase = "yellow"
-                elif rem <= 5 + 40:
-                    predicted_phase = "red"
-                else:
-                    predicted_phase = "green"
-            elif phase == "yellow":
-                rem -= time_left
-                if rem <= 40:
-                    predicted_phase = "red"
-                elif rem <= 40 + 45:
-                    predicted_phase = "green"
-                else:
-                    predicted_phase = "yellow"
-
-            # --- Suggest speed based on current phase ---
-            if current_phase == 'red' and distance <= 40:
-                suggestion = 'Slow Down'
-                car_speed = 0
-                waiting_at = next_signal
-            elif current_phase == 'green':
-                if car_speed < max_speed:
-                    suggestion = 'Speed Up'
-                    if random.random() < 0.7:
-                        car_speed += 5
-                        car_speed = min(car_speed, max_speed)
-                elif car_speed > min_speed:
-                    suggestion = 'Slow Down'
-                    if random.random() < 0.7:
-                        car_speed -= 5
-                        car_speed = max(car_speed, min_speed)
-
-        # --- Resume after red ---
-        if waiting_at and signal_states[waiting_at]['phase'] == 'green':
-            waiting_at = None
-            car_speed = 15
-
-        # --- Update advice smoothing ---
-        if suggestion == st.session_state.current_advice:
-            st.session_state.advice_counter += 1
-        else:
-            st.session_state.current_advice = suggestion
-            st.session_state.advice_counter = 1
-
-        stable_suggestion = st.session_state.current_advice if st.session_state.advice_counter >= 2 else "Maintain"
-
-        # --- Move car forward (if not waiting) ---
-        if car_speed > 0:
-            car_x += car_speed * 0.1
-
-        eta_str = "N/A" if math.isinf(eta) else f"{int(eta)}s"
-        info_box.markdown(
-            f"""
-            ### 🚘 Vehicle Info  
-            - **Speed:** {int(car_speed)} km/h  
-            - **Next Signal:** `{next_signal}`  
-            - **Distance to Signal:** `{int(distance)} px`  
-            - **Current Phase:** `{current_phase}`  
-            - **ETA:** `{eta_str}`  
-            - **Predicted Phase:** `{predicted_phase}`  
-            - **Advice (Stable):** 🚘 `{stable_suggestion}`
-            """
-        )
+def update_road_logic(cars, accident_info, log):
+    """
+    Updates the logic for one road.
+    Handles car movement, visual checks, and ATOA alerts.
+    """
+    for i in range(len(cars)):
+        car = cars[i]
         
-        # --- Voice Alert: Trigger only if predicted phase changed ---
-        if st.session_state.prev_predicted_phase != predicted_phase:
-            voice = ""
-            if stable_suggestion == "Speed Up":
-                voice = "Signal is green. You can speed up."
-            elif stable_suggestion == "Slow Down":
-                voice = "Red signal ahead. Please slow down."
-            elif stable_suggestion == "Maintain":
-                voice = "Maintain your current speed."
+        # --- Skip cars that are stopped or crashed ---
+        if car['status'] in ['Stopped', 'Crashed']:
+            car['speed'] = 0
+            continue
+
+        # --- 1. ATOA ALERT LOGIC (Your Project's Feature) ---
+        if accident_info and car['status'] != 'Braking (Alert)' and not car['log_alerted']:
+            car['alert'] = f"🚨 ATOA Alert: Accident at {int(accident_info['x'])}! Slowing down."
+            car['status'] = 'Braking (Alert)'
+            # --- ADD TO VISUAL LOG ---
+            add_log_entry(log, f"Car {car['id']}: Received broadcast! Braking immediately.")
+            car['log_alerted'] = True # Mark as alerted
+
+        # --- 2. DRIVER VISUAL LOGIC (Normal Human Driving) ---
+        car_in_front = cars[i-1] if i > 0 else None
+        
+        if car_in_front:
+            distance = car_in_front['x'] - car['x']
+
+            # A. Check for visual on the car in front
+            if distance <= VISIBILITY_DISTANCE:
+                # If the car in front is crashed...
+                if car_in_front['status'] == 'Crashed':
+                    # ...is it too late to stop?
+                    if distance <= BRAKING_DISTANCE:
+                        car['status'] = 'Crashed' # 💥 Chain reaction!
+                        car['alert'] = "Too close to stop! CRASHED."
+                        if not car['log_alerted']:
+                            add_log_entry(log, f"Car {car['id']}: CRASHED! (Too late to stop).")
+                            car['log_alerted'] = True
+                    else:
+                        # ...no, driver can see it and brake.
+                        if car['status'] != 'Braking (Visual)' and car['status'] != 'Braking (Alert)':
+                            car['status'] = 'Braking (Visual)'
+                            car['alert'] = "Driver View: Crash ahead! Braking."
+                            if not car['log_alerted']:
+                                add_log_entry(log, f"Car {car['id']}: Driver spotted crash. Braking.")
+                                car['log_alerted'] = True
+                
+                # If car in front is just braking, driver should also brake.
+                elif car_in_front['status'].startswith('Braking') and car['status'] == 'Normal':
+                    car['status'] = 'Braking (Visual)'
+                    car['alert'] = "Driver View: Car in front is braking."
             
-            components.html(
-                f"""
-                <script>
-                var msg = new SpeechSynthesisUtterance("{voice}");
-                window.speechSynthesis.cancel();
-                window.speechSynthesis.speak(msg);
-                </script>
-                """,
-                height=0
-            )
-            st.session_state.prev_predicted_phase = predicted_phase
+            # B. If car is braking (from alert or visual), manage its speed
+            if car['status'].startswith('Braking'):
+                car['speed'] = BRAKING_SPEED
+                # Logic to stop safely before the obstacle
+                obstacle_x = accident_info['x'] if accident_info else (car_in_front['x'] if car_in_front else ROAD_LENGTH)
+                if car['x'] >= (obstacle_x - BRAKING_DISTANCE - 5): # Stop 5 units behind
+                    if car['status'] != 'Stopped':
+                        car['status'] = 'Stopped'
+                        car['alert'] = "Stopped safely."
+                        add_log_entry(log, f"Car {car['id']}: Stopped safely.")
+            
+            # C. If no alerts and no visual, drive normally
+            elif car['status'] == 'Normal':
+                car['speed'] = NORMAL_SPEED
+                car['alert'] = "All clear."
+                # Simple follow logic to avoid bumping
+                if distance < (BRAKING_DISTANCE + 5):
+                    car['speed'] = BRAKING_SPEED
 
-        # --- ROAD VISUALIZATION ---
-        road_display = ["-"] * 120
-        for lbl in signal_labels:
-            pos = int(signal_states[lbl]["x"] / 10)
-            phase = signal_states[lbl]["phase"]
-            if phase == "red":
-                road_display[pos] = "🟥"
-            elif phase == "green":
-                road_display[pos] = "🟩"
-            elif phase == "yellow":
-                road_display[pos] = "🟨"
-        car_pos_index = int(car_x / 10)
-        if 0 <= car_pos_index < len(road_display):
-            road_display[car_pos_index] = "🔵"
-        road_box.markdown("### 🛣️ Road View")
-        road_box.code("".join(road_display))
+
+        # --- 3. Move the car ---
+        car['x'] += car['speed']
+        # Don't go off the road
+        car['x'] = min(car['x'], ROAD_LENGTH)
+
+
+def render_road(cars):
+    """Creates a text-based string for the road."""
+    # Create a road display with scale
+    display_length = 100 # Keep display 100 chars
+    road = ["-"] * display_length
+    for car in reversed(cars): # Draw back-to-front
+        # Scale car's position to the display length
+        pos = int(car['x'] / ROAD_LENGTH * display_length)
+        pos = min(pos, display_length - 1) # Ensure it's within bounds
         
-        # --- Display signal metrics ---
-        cols = st.columns(len(signal_labels))
-        for i, lbl in enumerate(signal_labels):
-            sig = signal_states[lbl]
-            with cols[i]:
-                st.metric(label=f"Signal {lbl}", value=sig['phase'].capitalize(), delta=f"{sig['timer']}s")
+        if 0 <= pos < display_length:
+            if car['status'] == 'Crashed':
+                road[pos] = "💥"
+            elif car['status'] == 'Stopped':
+                road[pos] = "■" # Stopped car
+            elif car['status'].startswith('Braking'):
+                road[pos] = "B" # Braking car
+            else:
+                road[pos] = "▶" # Normal car
+    return "".join(road)
 
-        time.sleep(1)
+# -----------------------
+# INITIALIZE SESSION STATE
+# -----------------------
+if 'simulation_running' not in st.session_state:
+    st.session_state.simulation_running = False
+
+if run_button:
+    st.session_state.road_1_cars = initialize_cars("A")
+    st.session_state.road_2_cars = initialize_cars("B")
+    st.session_state.road_2_accident = None 
+    st.session_state.simulation_running = True
+    # --- NEW: Initialize alert logs ---
+    st.session_state.road_1_alert_log = [f"[{get_time()}] Road 1 monitoring... All clear."]
+    st.session_state.road_2_alert_log = [f"[{get_time()}] Road 2 monitoring... All clear."]
+
+# -----------------------
+# MAIN SIMULATION LOOP
+# -----------------------
+if st.session_state.simulation_running:
+    
+    # --- 1. Check for a new RANDOM accident on Road 2 ---
+    if not st.session_state.road_2_accident: # If no accident has happened yet
+        lead_car_2 = st.session_state.road_2_cars[0]
+        # Check if lead car is on the road and a random event triggers
+        if lead_car_2['x'] > 50 and lead_car_2['x'] < (ROAD_LENGTH - 20) and random.random() < ACCIDENT_PROBABILITY:
+            lead_car_2['status'] = 'Crashed'
+            st.session_state.road_2_accident = {'x': lead_car_2['x']}
+            
+            # --- ADD TO VISUAL LOG ---
+            st.warning(f"💥 Accident Occurred on Road 2 at position {int(lead_car_2['x'])}!")
+            add_log_entry(st.session_state.road_2_alert_log, 
+                          f"CRITICAL: Accident detected at {int(lead_car_2['x'])}. Broadcasting ATOA alert to all nearby vehicles!")
+
+    # --- 2. Update logic for both roads ---
+    update_road_logic(st.session_state.road_1_cars, None, st.session_state.road_1_alert_log) 
+    update_road_logic(st.session_state.road_2_cars, st.session_state.road_2_accident, st.session_state.road_2_alert_log)
+
+    # --- 3. Render the simulation ---
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Road 1 (Control - No Alerts)")
+        st.code(render_road(st.session_state.road_1_cars))
+        # --- NEW: Visual Log Display ---
+        with st.expander("Road 1: Voice Assistant Log"):
+            st.write(st.session_state.road_1_alert_log)
+
+    with col2:
+        st.subheader("Road 2 (ATOA Protected)")
+        st.code(render_road(st.session_state.road_2_cars))
+        # --- NEW: Visual Log Display ---
+        with st.expander("Road 2: Voice Assistant Log", expanded=True):
+            st.write(st.session_state.road_2_alert_log)
+
+    # --- 4. Render info boxes ---
+    st.markdown("---")
+    st.markdown(f"**Fog Visibility:** {VISIBILITY_DISTANCE:.1f} units | **Safe Braking Distance:** {BRAKING_DISTANCE} units")
+    cols = st.columns(num_cars)
+    for i in range(num_cars):
+        car1 = st.session_state.road_1_cars[i]
+        car2 = st.session_state.road_2_cars[i]
+        
+        with cols[i]:
+            st.text(f"Car {car1['id']}")
+            st.metric(f"Pos: {int(car1['x'])}", car1['status'])
+            
+            st.text(f"Car {car2['id']}")
+            st.metric(f"Pos: {int(car2['x'])}", car2['status'])
+            if car2['alert'] and car2['status'] != 'Normal':
+                # Use different alert types based on status
+                if car2['status'] == 'Crashed':
+                    st.error(car2['alert'])
+                elif car2['status'] == 'Braking (Alert)':
+                    st.warning(car2['alert'])
+                else:
+                    st.info(car2['alert'])
+
+    # --- 5. Check end condition ---
+    road_1_finished = all(c['x'] >= ROAD_LENGTH or c['status'] in ['Stopped', 'Crashed'] for c in st.session_state.road_1_cars)
+    road_2_finished = all(c['x'] >= ROAD_LENGTH or c['status'] in ['Stopped', 'Crashed'] for c in st.session_state.road_2_cars)
+
+    if road_1_finished and road_2_finished:
+        st.session_state.simulation_running = False
+        st.success("Simulation Finished.")
+        if any(c['status'] == 'Crashed' for c in st.session_state.road_2_cars[1:]):
+            st.error("Result: Chain-reaction crash occurred on Road 2! (This shouldn't happen if ATOA is working)")
+        else:
+            st.success("Result: ATOA system successfully prevented a chain-reaction crash on Road 2!")
+    else:
+        # Rerun the script to create the animation loop
+        time.sleep(0.3)
+        st.rerun()
