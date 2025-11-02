@@ -9,10 +9,6 @@ st.set_page_config(page_title="Traffic Optimizer – Objective 2", layout="wide"
 st.title("🚦 Traffic Optimizer & Assistant - Objective 2 Simulation")
 st.markdown("""
 This assistant predicts upcoming traffic signal phases, estimates ETA, and gives smart speed suggestions to help a car reduce waiting time at red lights and optimize smooth passage through intersections.
-
-🧠 Now includes:
-- Driver may not always follow advice (real-world behavior)
-- Speed up advice only when it's realistically possible
 """)
 
 # -------------------- SIDEBAR --------------------
@@ -87,9 +83,6 @@ if start_sim:
     while car_pos <= 1100:
         update_signals()
 
-        # Simulate driver behavior: 70% chance they follow advice
-        driver_follows_suggestion = random.random() < 0.7
-
         # Get next upcoming signal
         next_signal = None
         for label in signal_labels:
@@ -110,44 +103,40 @@ if start_sim:
             eta = distance / (car_speed * 0.1) if car_speed > 0 else float('inf')
             predicted = predict_phase(sig, eta)
 
-            # ---------- SMART SUGGESTION LOGIC ----------
+            # SMART SPEED LOGIC
             if predicted == "red":
                 suggestion = "Slow Down"
-                if driver_follows_suggestion and car_speed > min_speed:
+                if car_speed > min_speed:
                     car_speed -= 2
                     car_speed = max(min_speed, car_speed)
-
             elif predicted == "green":
-                time_left = sig["timer"]
-                required_speed = (distance / time_left) * 10 if time_left > 0 else float('inf')
-                if eta <= time_left and required_speed <= max_speed:
+                if eta < sig["timer"]:
                     suggestion = "Speed Up"
-                    if driver_follows_suggestion and car_speed < max_speed:
+                    if car_speed < max_speed:
                         car_speed += 2
                         car_speed = min(max_speed, car_speed)
                 else:
                     suggestion = "Maintain"
-
             elif predicted == "yellow":
                 suggestion = "Slow Down"
-                if driver_follows_suggestion and car_speed > min_speed:
+                if car_speed > min_speed:
                     car_speed -= 2
                     car_speed = max(min_speed, car_speed)
 
-            # ---------- STOP IF RED AND CLOSE ----------
+            # RED LIGHT STOP LOGIC
             if current_phase == "red" and distance <= 40:
                 suggestion = "Stop"
                 car_speed = 0
                 waiting = True
                 waiting_signal = next_signal
 
-        # Resume if waiting and signal turns green
+        # Resume from red when light turns green
         if waiting and waiting_signal:
             if traffic_lights[waiting_signal]["phase"] == "green":
                 waiting = False
                 car_speed = 15
 
-        # ---------- Debounced Voice Alert ----------
+        # Debounced Voice Alerts
         now = time.time()
         if (st.session_state.prev_prediction != predicted) and (now - st.session_state.last_voice_time > 5):
             voice_text = ""
@@ -172,11 +161,11 @@ if start_sim:
             st.session_state.prev_prediction = predicted
             st.session_state.last_voice_time = now
 
-        # ---------- Move the Car ----------
+        # Move car
         if car_speed > 0:
             car_pos += car_speed * 0.1
 
-        # ---------- Display Info ----------
+        # Info Panel
         eta_str = "N/A" if math.isinf(eta) else f"{int(eta)}s"
         info_box.markdown(
             f"""
@@ -187,12 +176,11 @@ if start_sim:
             - **Current Signal Phase:** {current_phase}  
             - **ETA to Signal:** {eta_str}  
             - **Predicted Phase on Arrival:** {predicted}  
-            - **Suggestion:** **{suggestion}**  
-            - **Driver Action:** {"Followed" if driver_follows_suggestion else "Ignored"}
+            - **Suggestion:** **{suggestion}**
             """
         )
 
-        # ---------- Road Visualization ----------
+        # Road Visualization
         road = ["—"] * 120
         for label in signal_labels:
             idx = int(traffic_lights[label]["x"] / 10)
@@ -204,7 +192,7 @@ if start_sim:
         road_box.markdown("### 🛣️ Road View")
         road_box.code("".join(road))
 
-        # ---------- Signal Metrics ----------
+        # Traffic Light Timers
         cols = st.columns(len(signal_labels))
         for i, label in enumerate(signal_labels):
             sig = traffic_lights[label]
